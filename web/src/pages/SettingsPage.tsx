@@ -615,13 +615,16 @@ export function SettingsPage() {
                 </div>
               </div>
 
-              {priceAlerts.length === 0 ? (
+              {priceAlerts.filter((a) => a.status === 'pending').length ===
+              0 ? (
                 <div className="text-center py-8 text-zinc-600 text-sm">
-                  No price alerts yet
+                  No pending price alerts
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {priceAlerts.map((a) => (
+                  {priceAlerts
+                    .filter((a) => a.status === 'pending')
+                    .map((a) => (
                     <div
                       key={a.id}
                       className="w-full flex items-center justify-between px-4 py-3 rounded-xl bg-zinc-800/50 border border-zinc-700/50"
@@ -733,6 +736,7 @@ export function SettingsPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
           <PriceAlertModal
             onClose={() => setShowPriceAlertModal(false)}
+            existingAlerts={priceAlerts}
             onCreate={async (input) => {
               await api.createPriceAlert(input)
               toast.success("Alert created")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -389,4 +390,119 @@ func (s *Server) handleSymbols(c *gin.Context) {
 		"symbols":  symbols,
 		"count":    len(symbols),
 	})
+}
+
+type marketSymbolOption struct {
+	Symbol string  `json:"symbol"`
+	Name   string  `json:"name"`
+	Price  float64 `json:"price,omitempty"`
+}
+
+// handleSearchMarketSymbols searches tradable symbols by prefix (CoinAnk / Hyperliquid).
+func (s *Server) handleSearchMarketSymbols(c *gin.Context) {
+	exchange := strings.ToLower(strings.TrimSpace(c.DefaultQuery("exchange", "binance")))
+	q := strings.ToUpper(strings.TrimSpace(c.Query("q")))
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	if q == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "q is required"})
+		return
+	}
+
+	var options []marketSymbolOption
+
+	switch exchange {
+	case "hyperliquid", "hyperliquid-xyz", "xyz":
+		client := hyperliquid.NewClient()
+		ctx := context.Background()
+		mids, err := client.GetAllMids(ctx)
+		if err != nil {
+			SafeInternalError(c, "Failed to search Hyperliquid symbols", err)
+			return
+		}
+		for symbol, priceStr := range mids {
+			if strings.HasPrefix(symbol, "@") {
+				continue
+			}
+			upper := strings.ToUpper(symbol)
+			if !strings.HasPrefix(upper, q) {
+				continue
+			}
+			price, _ := strconv.ParseFloat(priceStr, 64)
+			options = append(options, marketSymbolOption{
+				Symbol: upper,
+				Name:   upper,
+				Price:  price,
+			})
+		}
+	default:
+		coinankExchange := mapExchangeToCoinank(exchange)
+		if coinankExchange == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported exchange"})
+			return
+		}
+
+		ctx := context.Background()
+		baseCoin := q
+		if strings.HasSuffix(q, "USDT") {
+			baseCoin = strings.TrimSuffix(q, "USDT")
+		}
+		rows, err := coinank_api.BaseCoinSymbols(ctx, coinankExchange, "", baseCoin)
+		if err != nil {
+			SafeInternalError(c, "Failed to search symbols", err)
+			return
+		}
+		for _, row := range rows {
+			if row.ProductType != "" && row.ProductType != "SWAP" {
+				continue
+			}
+			sym := strings.ToUpper(strings.TrimSpace(row.Symbol))
+			if sym == "" || !strings.HasPrefix(sym, q) {
+				continue
+			}
+			if row.ExchangeName != "" && !strings.EqualFold(row.ExchangeName, string(coinankExchange)) {
+				continue
+			}
+			options = append(options, marketSymbolOption{
+				Symbol: sym,
+				Name:   sym,
+				Price:  row.Price,
+			})
+		}
+	}
+
+	sort.Slice(options, func(i, j int) bool {
+		return options[i].Symbol < options[j].Symbol
+	})
+	if len(options) > limit {
+		options = options[:limit]
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"exchange": exchange,
+		"q":        q,
+		"symbols":  options,
+		"count":    len(options),
+	})
+}
+
+func mapExchangeToCoinank(exchange string) coinank_enum.Exchange {
+	switch strings.ToLower(exchange) {
+	case "binance":
+		return coinank_enum.Binance
+	case "bybit":
+		return coinank_enum.Bybit
+	case "okx":
+		return coinank_enum.Okex
+	case "bitget":
+		return coinank_enum.Bitget
+	case "gate":
+		return coinank_enum.Gate
+	case "aster":
+		return coinank_enum.Aster
+	default:
+		return ""
+	}
 }

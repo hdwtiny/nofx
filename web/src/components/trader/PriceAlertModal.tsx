@@ -1,5 +1,21 @@
-import { useMemo, useState } from 'react'
-import { X } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Loader2, X } from 'lucide-react'
+import type { PriceAlert } from '../../types'
+import { api } from '../../lib/api'
+import type { MarketSymbolOption } from '../../lib/api/market'
+
+const PLATFORMS = [
+  'binance',
+  'bybit',
+  'okx',
+  'bitget',
+  'gate',
+  'hyperliquid',
+] as const
+
+function alertKey(platform: string, symbol: string) {
+  return `${platform.toLowerCase()}::${symbol.toUpperCase()}`
+}
 
 export function PriceAlertModal(props: {
   onClose: () => void
@@ -8,28 +24,143 @@ export function PriceAlertModal(props: {
     platform: string
     target_price: number
   }) => Promise<void>
+  existingAlerts?: PriceAlert[]
   defaultPlatform?: string
   language?: string
 }) {
-  const { onClose, onCreate, defaultPlatform } = props
+  const { onClose, onCreate, defaultPlatform, existingAlerts = [] } = props
+
+  const blockedKeys = useMemo(() => {
+    const keys = new Set<string>()
+    for (const a of existingAlerts) {
+      if (a.status === 'pending') {
+        keys.add(alertKey(a.platform, a.symbol))
+      }
+    }
+    return keys
+  }, [existingAlerts])
+
   const [symbol, setSymbol] = useState('')
   const [platform, setPlatform] = useState(defaultPlatform || 'binance')
   const [targetPrice, setTargetPrice] = useState('')
   const [saving, setSaving] = useState(false)
 
+  const [suggestions, setSuggestions] = useState<MarketSymbolOption[]>([])
+  const [searching, setSearching] = useState(false)
+  const [showSuggestions, setShowSuggestions] = useState(false)
+
+  const [currentPrice, setCurrentPrice] = useState<number | null>(null)
+  const [priceLoading, setPriceLoading] = useState(false)
+  const [priceError, setPriceError] = useState<string | null>(null)
+
+  const dropdownRef = useRef<HTMLDivElement>(null)
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   const parsedTarget = useMemo(() => Number(targetPrice), [targetPrice])
+  const normalizedSymbol = symbol.trim().toUpperCase()
+
   const canSubmit =
-    symbol.trim().length > 0 &&
+    normalizedSymbol.length > 0 &&
     platform.trim().length > 0 &&
     Number.isFinite(parsedTarget) &&
-    parsedTarget > 0
+    parsedTarget > 0 &&
+    !blockedKeys.has(alertKey(platform, normalizedSymbol))
+
+  const loadCurrentPrice = useCallback(async (sym: string, exch: string) => {
+    const s = sym.trim().toUpperCase()
+    const p = exch.trim().toLowerCase()
+    if (!s || !p) {
+      setCurrentPrice(null)
+      return
+    }
+    setPriceLoading(true)
+    setPriceError(null)
+    try {
+      const close = await api.getLatestClose(s, p)
+      if (close == null) {
+        setCurrentPrice(null)
+        setPriceError('Unable to fetch current price')
+      } else {
+        setCurrentPrice(close)
+      }
+    } catch {
+      setCurrentPrice(null)
+      setPriceError('Unable to fetch current price')
+    } finally {
+      setPriceLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!normalizedSymbol || normalizedSymbol.length < 1) {
+      setCurrentPrice(null)
+      setPriceError(null)
+      return
+    }
+    const timer = setTimeout(() => {
+      loadCurrentPrice(normalizedSymbol, platform)
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [normalizedSymbol, platform, loadCurrentPrice])
+
+  useEffect(() => {
+    const q = symbol.trim().toUpperCase()
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
+
+    if (q.length < 1) {
+      setSuggestions([])
+      setSearching(false)
+      return
+    }
+
+    searchTimerRef.current = setTimeout(async () => {
+      setSearching(true)
+      try {
+        const rows = await api.searchSymbols(platform, q, 30)
+        const filtered = rows.filter(
+          (r) => !blockedKeys.has(alertKey(platform, r.symbol))
+        )
+        setSuggestions(filtered.slice(0, 20))
+      } catch {
+        setSuggestions([])
+      } finally {
+        setSearching(false)
+      }
+    }, 280)
+
+    return () => {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
+    }
+  }, [symbol, platform, blockedKeys])
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(event.target as Node)
+      ) {
+        setShowSuggestions(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const pickSuggestion = (opt: MarketSymbolOption) => {
+    setSymbol(opt.symbol)
+    setShowSuggestions(false)
+    if (opt.price && opt.price > 0) {
+      setCurrentPrice(opt.price)
+      setPriceError(null)
+    }
+  }
 
   const submit = async () => {
     if (!canSubmit) return
     setSaving(true)
     try {
       await onCreate({
-        symbol: symbol.trim(),
+        symbol: normalizedSymbol,
         platform: platform.trim(),
         target_price: parsedTarget,
       })
@@ -38,6 +169,10 @@ export function PriceAlertModal(props: {
       setSaving(false)
     }
   }
+
+  const duplicatePending = blockedKeys.has(
+    alertKey(platform, normalizedSymbol)
+  )
 
   return (
     <div className="w-full max-w-lg bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
@@ -59,26 +194,103 @@ export function PriceAlertModal(props: {
       <div className="p-5 space-y-4">
         <div>
           <label className="block text-xs font-medium text-zinc-400 mb-2">
+            Platform
+          </label>
+          <select
+            value={platform}
+            onChange={(e) => {
+              setPlatform(e.target.value)
+              setShowSuggestions(true)
+            }}
+            className="w-full bg-zinc-950/80 border border-zinc-700/80 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-nofx-gold/60 focus:ring-1 focus:ring-nofx-gold/30 transition-all"
+          >
+            {PLATFORMS.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="relative" ref={dropdownRef}>
+          <label className="block text-xs font-medium text-zinc-400 mb-2">
             Symbol
           </label>
           <input
             value={symbol}
-            onChange={(e) => setSymbol(e.target.value)}
-            placeholder="e.g. BTCUSDT"
+            onChange={(e) => {
+              setSymbol(e.target.value.toUpperCase())
+              setShowSuggestions(true)
+            }}
+            onFocus={() => setShowSuggestions(true)}
+            placeholder="Type prefix, e.g. BTC"
+            autoComplete="off"
             className="w-full bg-zinc-950/80 border border-zinc-700/80 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-nofx-gold/60 focus:ring-1 focus:ring-nofx-gold/30 transition-all"
           />
+          {showSuggestions && symbol.trim().length > 0 && (
+            <div className="absolute z-20 left-0 right-0 mt-1 max-h-48 overflow-y-auto rounded-xl border border-zinc-700/80 bg-zinc-950 shadow-xl">
+              {searching ? (
+                <div className="flex items-center gap-2 px-4 py-3 text-xs text-zinc-500">
+                  <Loader2 size={14} className="animate-spin" />
+                  Searching...
+                </div>
+              ) : suggestions.length === 0 ? (
+                <div className="px-4 py-3 text-xs text-zinc-500">
+                  No matching symbols (pending alerts are hidden)
+                </div>
+              ) : (
+                suggestions.map((opt) => (
+                  <button
+                    key={opt.symbol}
+                    type="button"
+                    onClick={() => pickSuggestion(opt)}
+                    className="w-full flex items-center justify-between px-4 py-2.5 text-left text-sm text-white hover:bg-zinc-800/80 transition-colors"
+                  >
+                    <span className="font-medium">{opt.symbol}</span>
+                    {opt.price != null && opt.price > 0 && (
+                      <span className="text-xs text-zinc-500 tabular-nums">
+                        {opt.price.toLocaleString(undefined, {
+                          maximumFractionDigits: 8,
+                        })}
+                      </span>
+                    )}
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+          <p className="text-[11px] text-zinc-500 mt-2">
+            Symbols with a pending alert on this platform are excluded.
+          </p>
         </div>
 
         <div>
           <label className="block text-xs font-medium text-zinc-400 mb-2">
-            Platform
+            Current Price
           </label>
-          <input
-            value={platform}
-            onChange={(e) => setPlatform(e.target.value)}
-            placeholder="e.g. binance / bybit / okx / hyperliquid"
-            className="w-full bg-zinc-950/80 border border-zinc-700/80 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-nofx-gold/60 focus:ring-1 focus:ring-nofx-gold/30 transition-all"
-          />
+          <div className="w-full bg-zinc-950/50 border border-zinc-800 rounded-xl px-4 py-3 text-sm text-zinc-300 tabular-nums">
+            {priceLoading ? (
+              <span className="inline-flex items-center gap-2 text-zinc-500">
+                <Loader2 size={14} className="animate-spin" />
+                Loading...
+              </span>
+            ) : currentPrice != null ? (
+              <span className="text-white font-medium">
+                {currentPrice.toLocaleString(undefined, {
+                  maximumFractionDigits: 8,
+                })}
+              </span>
+            ) : normalizedSymbol ? (
+              <span className="text-zinc-500">
+                {priceError || 'Enter a valid symbol'}
+              </span>
+            ) : (
+              <span className="text-zinc-600">—</span>
+            )}
+          </div>
+          <p className="text-[11px] text-zinc-500 mt-2">
+            Latest 1m kline close (perpetual reference).
+          </p>
         </div>
 
         <div>
@@ -88,13 +300,22 @@ export function PriceAlertModal(props: {
           <input
             value={targetPrice}
             onChange={(e) => setTargetPrice(e.target.value)}
-            placeholder="e.g. 65000"
+            placeholder={
+              currentPrice != null
+                ? `e.g. ${(currentPrice * 1.02).toFixed(2)}`
+                : 'e.g. 65000'
+            }
             inputMode="decimal"
             className="w-full bg-zinc-950/80 border border-zinc-700/80 rounded-xl px-4 py-3 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-nofx-gold/60 focus:ring-1 focus:ring-nofx-gold/30 transition-all"
           />
           <p className="text-[11px] text-zinc-500 mt-2">
             Trigger uses latest 1m kline high/low range (limit=2).
           </p>
+          {duplicatePending && (
+            <p className="text-[11px] text-amber-500/90 mt-1">
+              This symbol already has a pending alert on {platform}.
+            </p>
+          )}
         </div>
       </div>
 
@@ -110,4 +331,3 @@ export function PriceAlertModal(props: {
     </div>
   )
 }
-
