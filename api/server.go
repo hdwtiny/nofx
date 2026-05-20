@@ -318,6 +318,25 @@ After activating, create or update a trader with this strategy_id to apply it.`,
 				`:id = EXACT id from GET /api/strategies. Creates a copy with " (copy)" appended to the name.`,
 				s.handleDuplicateStrategy)
 
+			// Notifications (ServerChan) + Price alerts
+			s.routeWithSchema(protected, "GET", "/notifications/serverchan", "Get ServerChan (Server酱) configuration status",
+				`Returns: {"enabled":<bool>,"configured":<bool>}`,
+				s.handleGetServerChanConfig)
+			s.routeWithSchema(protected, "PUT", "/notifications/serverchan", "Upsert ServerChan (Server酱) SendKey",
+				`Body (plain): {"send_key":"<string>","enabled":<bool, default true>}
+If transport_encryption is enabled, body must be an encrypted payload (same format as /api/models).`,
+				s.handleUpsertServerChanConfig)
+
+			s.routeWithSchema(protected, "GET", "/price-alerts", "List price alerts",
+				`Returns: [{"id":"<string>","symbol":"BTCUSDT","platform":"binance","target_price":12345.6,"status":"pending|triggered|cancelled","triggered_at":"<RFC3339|null>","triggered_price":<number|null>,"created_at":"<RFC3339>"}]`,
+				s.handleListPriceAlerts)
+			s.routeWithSchema(protected, "POST", "/price-alerts", "Create one-time price alert (requires ServerChan configured)",
+				`Body: {"symbol":"BTCUSDT","platform":"binance","target_price":12345.6}`,
+				s.handleCreatePriceAlert)
+			s.routeWithSchema(protected, "DELETE", "/price-alerts/:id", "Delete price alert",
+				`:id = price alert id from GET /api/price-alerts`,
+				s.handleDeletePriceAlert)
+
 			// Data for specified trader (using query parameter ?trader_id=xxx)
 			// IMPORTANT: All ?trader_id= values must be the EXACT "trader_id" field from GET /api/my-traders
 			s.routeWithSchema(protected, "GET", "/status", "Trader running status",

@@ -30,6 +30,8 @@ type Store struct {
 	grid           *GridStore
 	aiCharge       *AIChargeStore
 	telegramConfig TelegramConfigStore
+	priceAlert     *PriceAlertStore
+	serverChanCfg  *ServerChanConfigStore
 
 	mu sync.RWMutex
 }
@@ -163,6 +165,12 @@ func (s *Store) initTables() error {
 	}
 	if err := s.AICharge().initTables(); err != nil {
 		return fmt.Errorf("failed to initialize AI charge tables: %w", err)
+	}
+	if err := s.PriceAlert().initTables(); err != nil {
+		return fmt.Errorf("failed to initialize price alert tables: %w", err)
+	}
+	if err := s.ServerChanConfig().initTables(); err != nil {
+		return fmt.Errorf("failed to initialize serverchan config tables: %w", err)
 	}
 	return nil
 }
@@ -305,6 +313,26 @@ func (s *Store) TelegramConfig() TelegramConfigStore {
 		s.telegramConfig = NewTelegramConfigStore(s.gdb)
 	}
 	return s.telegramConfig
+}
+
+// PriceAlert gets price alert storage
+func (s *Store) PriceAlert() *PriceAlertStore {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.priceAlert == nil {
+		s.priceAlert = NewPriceAlertStore(s.gdb)
+	}
+	return s.priceAlert
+}
+
+// ServerChanConfig gets ServerChan configuration storage
+func (s *Store) ServerChanConfig() *ServerChanConfigStore {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.serverChanCfg == nil {
+		s.serverChanCfg = NewServerChanConfigStore(s.gdb)
+	}
+	return s.serverChanCfg
 }
 
 // Close closes database connection

@@ -2,6 +2,7 @@ package main
 
 import (
 	"log/slog"
+	"nofx/alerting"
 	"nofx/api"
 	nofxiagent "nofx/agent"
 	"nofx/auth"
@@ -143,6 +144,7 @@ func main() {
 		}
 	}()
 
+
 	// Start the NOFXi web agent on top of the current dev branch services.
 	nofxiAgent := nofxiagent.New(traderManager, st, nil, slog.Default())
 	nofxiAgent.Start()
@@ -150,6 +152,14 @@ func main() {
 
 	agentWeb := nofxiagent.NewWebHandler(nofxiAgent, slog.Default())
 	server.RegisterAgentHandler(agentWeb)
+
+
+	// Start price alert worker (one-time alerts via ServerChan)
+	priceAlertWorker := alerting.NewPriceAlertWorker(st, slog.Default())
+	priceAlertWorker.Start()
+	defer priceAlertWorker.Stop()
+
+
 
 	// Start Telegram bot (if TELEGRAM_BOT_TOKEN is configured)
 	go telegram.Start(cfg, st, telegramReloadCh)
