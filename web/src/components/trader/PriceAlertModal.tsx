@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, X } from 'lucide-react'
 import { api } from '../../lib/api'
-import type { MarketSymbolOption } from '../../lib/api/market'
+import {
+  resolveAlertSymbol,
+  type MarketSymbolOption,
+} from '../../lib/api/market'
 
 const PLATFORMS = [
   'binance',
@@ -31,6 +34,7 @@ export function PriceAlertModal(props: {
 
   const [suggestions, setSuggestions] = useState<MarketSymbolOption[]>([])
   const [searching, setSearching] = useState(false)
+  const [searchError, setSearchError] = useState<string | null>(null)
   const [showSuggestions, setShowSuggestions] = useState(false)
 
   const [currentPrice, setCurrentPrice] = useState<number | null>(null)
@@ -41,7 +45,10 @@ export function PriceAlertModal(props: {
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const parsedTarget = useMemo(() => Number(targetPrice), [targetPrice])
-  const normalizedSymbol = symbol.trim().toUpperCase()
+  const normalizedSymbol = useMemo(
+    () => resolveAlertSymbol(symbol, platform),
+    [symbol, platform]
+  )
 
   const canSubmit =
     normalizedSymbol.length > 0 &&
@@ -50,7 +57,7 @@ export function PriceAlertModal(props: {
     parsedTarget > 0
 
   const loadCurrentPrice = useCallback(async (sym: string, exch: string) => {
-    const s = sym.trim().toUpperCase()
+    const s = resolveAlertSymbol(sym, exch)
     const p = exch.trim().toLowerCase()
     if (!s || !p) {
       setCurrentPrice(null)
@@ -92,17 +99,36 @@ export function PriceAlertModal(props: {
 
     if (q.length < 1) {
       setSuggestions([])
+      setSearchError(null)
       setSearching(false)
       return
     }
 
     searchTimerRef.current = setTimeout(async () => {
       setSearching(true)
+      setSearchError(null)
       try {
         const rows = await api.searchSymbols(platform, q, 30)
-        setSuggestions(rows.slice(0, 20))
-      } catch {
+        if (rows.length > 0) {
+          setSuggestions(rows.slice(0, 20))
+        } else {
+          // Fallback: user may type base coin (LIT) while API lists LITUSDT
+          const resolved = resolveAlertSymbol(q, platform)
+          const close = await api.getLatestClose(resolved, platform)
+          if (close != null) {
+            setSuggestions([
+              { symbol: resolved, name: resolved, price: close },
+            ])
+          } else {
+            setSuggestions([])
+            setSearchError('No matching symbols on this platform')
+          }
+        }
+      } catch (e) {
         setSuggestions([])
+        setSearchError(
+          e instanceof Error ? e.message : 'Symbol search failed'
+        )
       } finally {
         setSearching(false)
       }
@@ -140,7 +166,7 @@ export function PriceAlertModal(props: {
     setSaving(true)
     try {
       await onCreate({
-        symbol: normalizedSymbol,
+        symbol: resolveAlertSymbol(symbol, platform),
         platform: platform.trim(),
         target_price: parsedTarget,
       })
@@ -212,7 +238,7 @@ export function PriceAlertModal(props: {
                 </div>
               ) : suggestions.length === 0 ? (
                 <div className="px-4 py-3 text-xs text-zinc-500">
-                  No matching symbols
+                  {searchError || 'No matching symbols'}
                 </div>
               ) : (
                 suggestions.map((opt) => (

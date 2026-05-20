@@ -449,27 +449,56 @@ func (s *Server) handleSearchMarketSymbols(c *gin.Context) {
 		if strings.HasSuffix(q, "USDT") {
 			baseCoin = strings.TrimSuffix(q, "USDT")
 		}
-		rows, err := coinank_api.BaseCoinSymbols(ctx, coinankExchange, "", baseCoin)
-		if err != nil {
-			SafeInternalError(c, "Failed to search symbols", err)
-			return
+		symbolQuery := q
+		if !strings.HasSuffix(symbolQuery, "USDT") && len(baseCoin) > 0 {
+			symbolQuery = baseCoin + "USDT"
 		}
-		for _, row := range rows {
-			if row.ProductType != "" && row.ProductType != "SWAP" {
+
+		seen := make(map[string]struct{})
+		addRows := func(rows []coinank_api.BaseCoinResponse) {
+			for _, row := range rows {
+				if row.ProductType != "" && row.ProductType != "SWAP" {
+					continue
+				}
+				sym := strings.ToUpper(strings.TrimSpace(row.Symbol))
+				if sym == "" {
+					continue
+				}
+				bc := strings.ToUpper(strings.TrimSpace(row.BaseCoin))
+				if !symbolMatchesQuery(sym, bc, q) {
+					continue
+				}
+				if _, ok := seen[sym]; ok {
+					continue
+				}
+				seen[sym] = struct{}{}
+				options = append(options, marketSymbolOption{
+					Symbol: sym,
+					Name:   sym,
+					Price:  row.Price,
+				})
+			}
+		}
+
+		queries := []struct {
+			symbol   string
+			baseCoin string
+		}{
+			{"", baseCoin},
+			{symbolQuery, ""},
+			{q, ""},
+		}
+		for _, query := range queries {
+			if query.symbol == "" && query.baseCoin == "" {
 				continue
 			}
-			sym := strings.ToUpper(strings.TrimSpace(row.Symbol))
-			if sym == "" || !strings.HasPrefix(sym, q) {
+			rows, err := coinank_api.BaseCoinSymbols(ctx, coinankExchange, query.symbol, query.baseCoin)
+			if err != nil {
+				logger.Warnf("⚠️ CoinAnk symbol search failed (exchange=%s symbol=%s baseCoin=%s): %v",
+					exchange, query.symbol, query.baseCoin, err)
 				continue
 			}
-			if row.ExchangeName != "" && !strings.EqualFold(row.ExchangeName, string(coinankExchange)) {
-				continue
-			}
-			options = append(options, marketSymbolOption{
-				Symbol: sym,
-				Name:   sym,
-				Price:  row.Price,
-			})
+			addRows(rows)
 		}
 	}
 
@@ -486,6 +515,16 @@ func (s *Server) handleSearchMarketSymbols(c *gin.Context) {
 		"symbols":  options,
 		"count":    len(options),
 	})
+}
+
+func symbolMatchesQuery(sym, baseCoin, q string) bool {
+	if strings.HasPrefix(sym, q) || strings.HasPrefix(baseCoin, q) {
+		return true
+	}
+	if strings.HasSuffix(q, "USDT") {
+		return sym == q
+	}
+	return sym == q+"USDT" || sym == q
 }
 
 func mapExchangeToCoinank(exchange string) coinank_enum.Exchange {

@@ -6,6 +6,18 @@ export type MarketSymbolOption = {
   price?: number
 }
 
+/** Normalize user input to exchange symbol (CEX perps use *USDT). */
+export function resolveAlertSymbol(input: string, exchange: string): string {
+  const s = input.trim().toUpperCase()
+  if (!s) return s
+  const ex = exchange.trim().toLowerCase()
+  if (ex === 'hyperliquid' || ex === 'hyperliquid-xyz' || ex === 'xyz') {
+    return s
+  }
+  if (s.endsWith('USDT')) return s
+  return `${s}USDT`
+}
+
 export const marketApi = {
   async searchSymbols(
     exchange: string,
@@ -30,8 +42,9 @@ export const marketApi = {
     symbol: string,
     exchange: string
   ): Promise<number | null> {
+    const resolved = resolveAlertSymbol(symbol, exchange)
     const params = new URLSearchParams({
-      symbol: symbol.trim(),
+      symbol: resolved,
       exchange: exchange.trim(),
       interval: '1m',
       limit: '1',
