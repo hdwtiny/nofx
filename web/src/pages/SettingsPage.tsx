@@ -736,7 +736,6 @@ export function SettingsPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
           <PriceAlertModal
             onClose={() => setShowPriceAlertModal(false)}
-            existingAlerts={priceAlerts}
             onCreate={async (input) => {
               await api.createPriceAlert(input)
               toast.success("Alert created")

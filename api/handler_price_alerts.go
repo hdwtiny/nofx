@@ -58,20 +58,6 @@ func (s *Server) handleCreatePriceAlert(c *gin.Context) {
 		return
 	}
 
-	existing, err := s.store.PriceAlert().List(userID)
-	if err != nil {
-		SafeInternalError(c, "Failed to check existing alerts", err)
-		return
-	}
-	for _, a := range existing {
-		if a.Status == store.PriceAlertStatusPending &&
-			strings.EqualFold(a.Symbol, req.Symbol) &&
-			strings.EqualFold(a.Platform, req.Platform) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "A pending alert already exists for this symbol on this platform"})
-			return
-		}
-	}
-
 	// Determine direction based on reference price at creation time.
 	_, _, closePrice, err := alerting.FetchLatestKlineRange(req.Platform, req.Symbol)
 	if err != nil || closePrice <= 0 {

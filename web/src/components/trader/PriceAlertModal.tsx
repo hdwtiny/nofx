@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, X } from 'lucide-react'
-import type { PriceAlert } from '../../types'
 import { api } from '../../lib/api'
 import type { MarketSymbolOption } from '../../lib/api/market'
 
@@ -13,10 +12,6 @@ const PLATFORMS = [
   'hyperliquid',
 ] as const
 
-function alertKey(platform: string, symbol: string) {
-  return `${platform.toLowerCase()}::${symbol.toUpperCase()}`
-}
-
 export function PriceAlertModal(props: {
   onClose: () => void
   onCreate: (input: {
@@ -24,21 +19,10 @@ export function PriceAlertModal(props: {
     platform: string
     target_price: number
   }) => Promise<void>
-  existingAlerts?: PriceAlert[]
   defaultPlatform?: string
   language?: string
 }) {
-  const { onClose, onCreate, defaultPlatform, existingAlerts = [] } = props
-
-  const blockedKeys = useMemo(() => {
-    const keys = new Set<string>()
-    for (const a of existingAlerts) {
-      if (a.status === 'pending') {
-        keys.add(alertKey(a.platform, a.symbol))
-      }
-    }
-    return keys
-  }, [existingAlerts])
+  const { onClose, onCreate, defaultPlatform } = props
 
   const [symbol, setSymbol] = useState('')
   const [platform, setPlatform] = useState(defaultPlatform || 'binance')
@@ -63,8 +47,7 @@ export function PriceAlertModal(props: {
     normalizedSymbol.length > 0 &&
     platform.trim().length > 0 &&
     Number.isFinite(parsedTarget) &&
-    parsedTarget > 0 &&
-    !blockedKeys.has(alertKey(platform, normalizedSymbol))
+    parsedTarget > 0
 
   const loadCurrentPrice = useCallback(async (sym: string, exch: string) => {
     const s = sym.trim().toUpperCase()
@@ -117,10 +100,7 @@ export function PriceAlertModal(props: {
       setSearching(true)
       try {
         const rows = await api.searchSymbols(platform, q, 30)
-        const filtered = rows.filter(
-          (r) => !blockedKeys.has(alertKey(platform, r.symbol))
-        )
-        setSuggestions(filtered.slice(0, 20))
+        setSuggestions(rows.slice(0, 20))
       } catch {
         setSuggestions([])
       } finally {
@@ -131,7 +111,7 @@ export function PriceAlertModal(props: {
     return () => {
       if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
     }
-  }, [symbol, platform, blockedKeys])
+  }, [symbol, platform])
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -169,10 +149,6 @@ export function PriceAlertModal(props: {
       setSaving(false)
     }
   }
-
-  const duplicatePending = blockedKeys.has(
-    alertKey(platform, normalizedSymbol)
-  )
 
   return (
     <div className="w-full max-w-lg bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden">
@@ -236,7 +212,7 @@ export function PriceAlertModal(props: {
                 </div>
               ) : suggestions.length === 0 ? (
                 <div className="px-4 py-3 text-xs text-zinc-500">
-                  No matching symbols (pending alerts are hidden)
+                  No matching symbols
                 </div>
               ) : (
                 suggestions.map((opt) => (
@@ -259,9 +235,6 @@ export function PriceAlertModal(props: {
               )}
             </div>
           )}
-          <p className="text-[11px] text-zinc-500 mt-2">
-            Symbols with a pending alert on this platform are excluded.
-          </p>
         </div>
 
         <div>
@@ -311,11 +284,6 @@ export function PriceAlertModal(props: {
           <p className="text-[11px] text-zinc-500 mt-2">
             Trigger uses latest 1m kline high/low range (limit=2).
           </p>
-          {duplicatePending && (
-            <p className="text-[11px] text-amber-500/90 mt-1">
-              This symbol already has a pending alert on {platform}.
-            </p>
-          )}
         </div>
       </div>
 
