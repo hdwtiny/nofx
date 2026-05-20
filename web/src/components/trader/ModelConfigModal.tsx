@@ -11,6 +11,7 @@ import { ModelStepIndicator } from './ModelStepIndicator'
 import { ModelCard } from './ModelCard'
 import {
   CLAW402_MODELS,
+  DEFAULT_CLAW402_MODEL,
   AI_PROVIDER_CONFIG,
   getShortName,
 } from './model-constants'
