@@ -2,8 +2,9 @@ package main
 
 import (
 	"log/slog"
-	nofxiagent "nofx/agent"
+	"nofx/alerting"
 	"nofx/api"
+	nofxiagent "nofx/agent"
 	"nofx/auth"
 	"nofx/config"
 	"nofx/crypto"
@@ -149,6 +150,13 @@ func main() {
 			logger.Fatalf("❌ Failed to start API server: %v", err)
 		}
 	}()
+
+
+	// Start price alert worker (one-time alerts via ServerChan)
+	priceAlertWorker := alerting.NewPriceAlertWorker(st, slog.Default())
+	priceAlertWorker.Start()
+	defer priceAlertWorker.Stop()
+
 
 	// Start Telegram bot (if TELEGRAM_BOT_TOKEN is configured)
 	go telegram.Start(cfg, st, telegramReloadCh)

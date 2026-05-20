@@ -1,15 +1,31 @@
 import { useState, useEffect } from 'react'
 import { toast } from 'sonner'
-import { User, Cpu, Building2, MessageCircle, Eye, EyeOff, ChevronRight, Plus, Pencil } from 'lucide-react'
+
+import {
+  User,
+  Cpu,
+  Building2,
+  MessageCircle,
+  Bell,
+  Eye,
+  EyeOff,
+  ChevronRight,
+  Plus,
+  Pencil,
+} from 'lucide-react'
+
 import { useAuth } from '../contexts/AuthContext'
 import { useLanguage } from '../contexts/LanguageContext'
 import { api } from '../lib/api'
 import { ExchangeConfigModal } from '../components/trader/ExchangeConfigModal'
 import { TelegramConfigModal } from '../components/trader/TelegramConfigModal'
 import { ModelConfigModal } from '../components/trader/ModelConfigModal'
+import { PriceAlertModal } from '../components/trader/PriceAlertModal'
+import { ServerChanConfigModal } from '../components/trader/ServerChanConfigModal'
 import type { Exchange, AIModel } from '../types'
+import type { PriceAlert, ServerChanConfigStatus } from '../types'
 
-type Tab = 'account' | 'models' | 'exchanges' | 'telegram'
+type Tab = 'account' | 'models' | 'exchanges' | 'telegram' | 'alerts'
 
 function configBadge(label: string, active: boolean) {
   return (
@@ -49,6 +65,13 @@ export function SettingsPage() {
   // Telegram state
   const [showTelegramModal, setShowTelegramModal] = useState(false)
 
+  // Alerts state
+  const [serverChanStatus, setServerChanStatus] =
+    useState<ServerChanConfigStatus | null>(null)
+  const [priceAlerts, setPriceAlerts] = useState<PriceAlert[]>([])
+  const [showServerChanModal, setShowServerChanModal] = useState(false)
+  const [showPriceAlertModal, setShowPriceAlertModal] = useState(false)
+
   const refreshModelConfigs = async () => {
     const [configs, supported] = await Promise.all([
       api.getModelConfigs(),
@@ -63,6 +86,15 @@ export function SettingsPage() {
     setExchanges(refreshed)
   }
 
+  const refreshAlerts = async () => {
+    const [status, alerts] = await Promise.all([
+      api.getServerChanStatus(),
+      api.listPriceAlerts(),
+    ])
+    setServerChanStatus(status)
+    setPriceAlerts(alerts)
+  }
+
   // Fetch data when tabs are visited
   useEffect(() => {
     if (activeTab === 'models') {
@@ -72,6 +104,9 @@ export function SettingsPage() {
     if (activeTab === 'exchanges') {
       refreshExchangeConfigs()
         .catch(() => toast.error('Failed to load exchanges'))
+    }
+    if (activeTab === 'alerts') {
+      refreshAlerts().catch(() => toast.error('Failed to load alerts'))
     }
   }, [activeTab])
 
@@ -273,6 +308,7 @@ export function SettingsPage() {
     { key: 'models', label: 'AI Models', icon: <Cpu size={16} /> },
     { key: 'exchanges', label: 'Exchanges', icon: <Building2 size={16} /> },
     { key: 'telegram', label: 'Telegram', icon: <MessageCircle size={16} /> },
+    { key: 'alerts', label: 'Alerts', icon: <Bell size={16} /> },
   ]
 
   return (
@@ -472,6 +508,93 @@ export function SettingsPage() {
               </button>
             </div>
           )}
+
+          {/* Alerts Tab */}
+          {activeTab === 'alerts' && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-zinc-400">
+                  ServerChan:{" "}
+                  {serverChanStatus?.configured
+                    ? serverChanStatus.enabled
+                      ? "Configured"
+                      : "Disabled"
+                    : "Not configured"}
+                </p>
+                <button
+                  onClick={() => setShowServerChanModal(true)}
+                  className="flex items-center gap-1.5 text-xs font-medium bg-nofx-gold/10 hover:bg-nofx-gold/20 text-nofx-gold px-3 py-1.5 rounded-lg transition-colors"
+                >
+                  <Pencil size={14} />
+                  Configure
+                </button>
+              </div>
+
+              <div className="border border-zinc-800 rounded-xl p-4 bg-zinc-950/40">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-white">
+                      Price Alerts
+                    </p>
+                    <p className="text-xs text-zinc-500 mt-1">
+                      One-time alerts using latest 1m kline high/low range.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setShowPriceAlertModal(true)}
+                    className="flex items-center gap-1.5 text-xs font-medium bg-nofx-gold/10 hover:bg-nofx-gold/20 text-nofx-gold px-3 py-1.5 rounded-lg transition-colors"
+                  >
+                    <Plus size={14} />
+                    Add Alert
+                  </button>
+                </div>
+              </div>
+
+              {priceAlerts.length === 0 ? (
+                <div className="text-center py-8 text-zinc-600 text-sm">
+                  No price alerts yet
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {priceAlerts.map((a) => (
+                    <div
+                      key={a.id}
+                      className="w-full flex items-center justify-between px-4 py-3 rounded-xl bg-zinc-800/50 border border-zinc-700/50"
+                    >
+                      <div className="text-left">
+                        <p className="text-sm font-medium text-white">
+                          {a.symbol}{" "}
+                          <span className="text-xs text-zinc-500">
+                            ({a.platform})
+                          </span>
+                        </p>
+                        <p className="text-xs text-zinc-500 mt-1">
+                          Target: {a.target_price} • Direction: {a.direction} •
+                          Status: {a.status}
+                        </p>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          try {
+                            await api.deletePriceAlert(a.id)
+                            toast.success("Alert deleted")
+                            refreshAlerts().catch(() => {})
+                          } catch (e) {
+                            toast.error(
+                              e instanceof Error ? e.message : "Delete failed"
+                            )
+                          }
+                        }}
+                        className="text-xs px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-950 text-zinc-300 border border-zinc-700/60 transition-colors"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -509,6 +632,41 @@ export function SettingsPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
           <TelegramConfigModal
             onClose={() => setShowTelegramModal(false)}
+            language={language}
+          />
+        </div>
+      )}
+
+      {/* ServerChan Modal */}
+      {showServerChanModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
+          <ServerChanConfigModal
+            onClose={() => setShowServerChanModal(false)}
+            onSave={async (input) => {
+              try {
+                await api.upsertServerChanConfig(input)
+                toast.success("ServerChan saved")
+                await refreshAlerts()
+              } catch (e) {
+                toast.error(
+                  e instanceof Error ? e.message : "Failed to save ServerChan"
+                )
+              }
+            }}
+          />
+        </div>
+      )}
+
+      {/* Price Alert Modal */}
+      {showPriceAlertModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-4">
+          <PriceAlertModal
+            onClose={() => setShowPriceAlertModal(false)}
+            onCreate={async (input) => {
+              await api.createPriceAlert(input)
+              toast.success("Alert created")
+              await refreshAlerts()
+            }}
             language={language}
           />
         </div>
